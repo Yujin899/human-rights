@@ -215,13 +215,14 @@ export default function StudyModePDF() {
                 centerOnInit
                 wheel={{ step: 0.1 }}
                 pinch={{ step: 1 }}
-                disabled={activeTool !== "pan" && isDrawingMode}
                 panning={{
-                    disabled: activeTool !== "pan" && isDrawingMode,
-                    excluded: ["button", "input", "select", "textarea", "a"]
+                    disabled: activeTool !== "pan" && isDrawingMode && false, // Never fully disable, use exclusion instead
+                    excluded: ["button", "input", "select", "textarea", "a"],
+                    velocityDisabled: true
                 }}
+                doubleClick={{ disabled: true }}
             >
-                {({ zoomIn, zoomOut, resetTransform, centerView, state }) => (
+                {({ zoomIn, zoomOut, centerView, state }: any) => (
                     <>
                         {/* Zoom Controls Overlay */}
                         <ZoomControls
@@ -235,10 +236,11 @@ export default function StudyModePDF() {
 
                         {/* Main Content Area */}
                         <div
-                            className="relative overflow-hidden cursor-move"
+                            className="relative overflow-hidden"
                             style={{
                                 height: isFullScreen ? "100vh" : "calc(100vh - 80px)",
-                                cursor: activeTool === "pan" ? "grab" : "default"
+                                cursor: activeTool === "pan" ? "grab" : "default",
+                                touchAction: "none" // We handle touch via the library
                             }}
                         >
                             <TransformComponent
@@ -282,7 +284,7 @@ export default function StudyModePDF() {
                                                         width: "100%",
                                                         height: "100%",
                                                         cursor: isDrawingMode && activeTool !== "pan" ? "crosshair" : "inherit",
-                                                        touchAction: "none"
+                                                        touchAction: "none" // 1-finger draw, 2-finger will bubble to wrapper
                                                     }}
                                                 />
                                             </div>

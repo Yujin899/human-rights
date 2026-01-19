@@ -2,18 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Question, UserAnswer } from "@/lib/types";
-import { validateAnswer, calculateScore, getCorrectAnswerText, shuffleArray } from "@/lib/validation";
+import { Question } from "@/lib/types";
+import { getCorrectAnswerText, shuffleArray } from "@/lib/validation";
 import { getChunkById, getChunkLectures } from "@/lib/chunks";
-import { QuestionCard } from "@/components/QuestionCard";
-import { AnswerFeedback } from "@/components/AnswerFeedback";
-import { ProgressBar } from "@/components/ProgressBar";
-import { ScoreDisplay } from "@/components/ScoreDisplay";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ChevronLeft, Home } from "lucide-react";
+import { Home, RotateCcw, Tally4 } from "lucide-react";
 import Link from "next/link";
 import questionsData from "@/data/questions.json";
+import { cn } from "@/lib/utils";
+import { ZoomControls } from "@/components/ZoomControls";
 
 export default function QuizMode() {
     const params = useParams();
@@ -24,161 +22,201 @@ export default function QuizMode() {
     const chunkLectures = getChunkLectures(chunkId);
 
     const [questions, setQuestions] = useState<Question[]>([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [userAnswers, setUserAnswers] = useState<UserAnswer[]>([]);
-    const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-    const [isSubmitted, setIsSubmitted] = useState(false);
-    const [isCompleted, setIsCompleted] = useState(false);
+    const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
+    const [submittedQuestions, setSubmittedQuestions] = useState<Set<number>>(new Set());
+    const [zoom, setZoom] = useState(1);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isMounted, setIsMounted] = useState(false);
 
     useEffect(() => {
-        // Filter and shuffle questions for the chunk quiz
+        setIsMounted(true);
         const filtered = (questionsData.questions as Question[]).filter((q) =>
             chunkLectures.includes(q.lecture_number)
         );
-        setQuestions(shuffleArray(filtered));
-    }, [chunkId, chunkLectures]); // Added chunkLectures to dependencies
 
-    if (!chunk || (questions.length === 0 && currentIndex === 0 && !isCompleted)) {
-        if (!chunk) router.push("/");
+        // Shuffle questions AND their choices
+        const shuffledQuestions = shuffleArray(filtered).map(q => ({
+            ...q,
+            choices: q.type === "mcq" ? shuffleArray([...(q.choices || [])]) : q.choices
+        }));
+
+        setQuestions(shuffledQuestions);
+    }, [chunkId, chunkLectures]);
+
+    if (!isMounted || !chunk || questions.length === 0) {
+        if (isMounted && !chunk) router.push("/");
         return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
     }
 
-    const currentQuestion = questions[currentIndex];
+    const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.1, 2));
+    const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.1, 0.5));
+    const handleToggleFullScreen = () => setIsFullScreen(!isFullScreen);
 
-    const handleSubmit = () => {
-        if (!selectedAnswer) return;
-
-        const isCorrect = validateAnswer(
-            selectedAnswer,
-            currentQuestion.answer,
-            currentQuestion.choices
-        );
-
-        const newAnswer: UserAnswer = {
-            questionId: currentQuestion.id,
-            userAnswer: selectedAnswer,
-            isCorrect,
-            timestamp: Date.now(),
-        };
-
-        setUserAnswers([...userAnswers, newAnswer]);
-        setIsSubmitted(true);
+    const handleClearAll = () => {
+        setSelectedAnswers({});
+        setSubmittedQuestions(new Set());
     };
 
-    const handleNext = () => {
-        if (currentIndex < questions.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-            setSelectedAnswer(null);
-            setIsSubmitted(false);
-        } else {
-            setIsCompleted(true);
-        }
+    const handleChoiceClick = (questionId: number, choice: string) => {
+        if (submittedQuestions.has(questionId)) return;
+
+        setSelectedAnswers(prev => ({ ...prev, [questionId]: choice }));
+        setSubmittedQuestions(prev => {
+            const next = new Set(prev);
+            next.add(questionId);
+            return next;
+        });
     };
 
-    const handleRestart = () => {
-        const filtered = (questionsData.questions as Question[]).filter((q) =>
-            chunkLectures.includes(q.lecture_number)
-        );
-        setQuestions(shuffleArray(filtered));
-        setCurrentIndex(0);
-        setUserAnswers([]);
-        setSelectedAnswer(null);
-        setIsSubmitted(false);
-        setIsCompleted(false);
-    };
+    // Calculate Score
+    const correctCount = Object.entries(selectedAnswers).filter(([qId, choice]) => {
+        const question = questions.find(q => q.id === parseInt(qId));
+        if (!question) return false;
+        return choice === getCorrectAnswerText(question.answer, (questionsData.questions as Question[]).find(origQ => origQ.id === question.id)?.choices || []);
+    }).length;
 
-    const score = calculateScore(userAnswers);
-    const correctAnswerText = getCorrectAnswerText(
-        currentQuestion.answer,
-        currentQuestion.choices
-    );
-
-    if (isCompleted) {
-        return (
-            <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-                <div className="absolute top-4 left-4 flex items-center gap-3">
-                    <Link href="/">
-                        <Button variant="outline" size="icon">
-                            <Home className="h-5 w-5" />
-                        </Button>
-                    </Link>
-                    <ThemeToggle />
-                </div>
-                <ScoreDisplay
-                    correct={score.correct}
-                    incorrect={score.incorrect}
-                    total={score.total}
-                    percentage={score.percentage}
-                    onRestart={handleRestart}
-                />
-            </div>
-        );
-    }
+    const progress = questions.length > 0 ? (submittedQuestions.size / questions.length) * 100 : 0;
 
     return (
-        <div className="min-h-screen bg-background py-4 sm:py-6 md:py-8 px-3 sm:px-4">
-            <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-                    <div className="flex-1">
-                        <h1 className="text-xl sm:text-2xl font-bold">اختبار - {chunk.name}</h1>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                            المحاضرات {chunk.lectures.join(" - ")}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-2 sm:gap-3">
-                        <Link href="/">
-                            <Button variant="outline" size="icon">
-                                <Home className="h-4 w-4 sm:h-5 sm:w-5" />
+        <div className="min-h-screen bg-background">
+            {/* Header */}
+            {!isFullScreen && (
+                <div className="sticky top-0 z-40 bg-background border-b shadow-sm">
+                    <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+                        <div className="flex-1">
+                            <h1 className="text-lg font-bold">{chunk.name}</h1>
+                            <div className="flex items-center gap-4 mt-1">
+                                <div className="flex items-center gap-1.5 text-primary">
+                                    <Tally4 className="h-4 w-4" />
+                                    <span className="text-sm font-bold">الدرجة: {correctCount} / {questions.length}</span>
+                                </div>
+                                <div className="flex-1 max-w-[100px] h-1.5 bg-slate-100 rounded-full overflow-hidden hidden sm:block">
+                                    <div
+                                        className="h-full bg-primary transition-all duration-500"
+                                        style={{ width: `${progress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={handleClearAll} className="gap-2 text-destructive hover:text-destructive">
+                                <RotateCcw className="h-4 w-4" />
+                                إعادة البدء
                             </Button>
-                        </Link>
-                        <ThemeToggle />
+                            <Link href="/">
+                                <Button variant="outline" size="icon">
+                                    <Home className="h-4 w-4" />
+                                </Button>
+                            </Link>
+                            <ThemeToggle />
+                        </div>
                     </div>
                 </div>
+            )}
 
-                {/* Progress Bar */}
-                <ProgressBar
-                    current={currentIndex + 1}
-                    total={questions.length}
-                />
+            <ZoomControls
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onReset={handleToggleFullScreen}
+                currentZoom={zoom}
+                isFullScreen={isFullScreen}
+            />
 
-                {/* Question Card */}
-                <QuestionCard
-                    question={currentQuestion}
-                    selectedAnswer={selectedAnswer}
-                    onAnswerChange={setSelectedAnswer}
-                    isSubmitted={isSubmitted}
-                />
-
-                {/* Answer Feedback */}
-                {isSubmitted && (
-                    <AnswerFeedback
-                        isCorrect={userAnswers[userAnswers.length - 1].isCorrect}
-                        correctAnswer={correctAnswerText}
-                        userAnswer={selectedAnswer || ""}
-                        explanation={currentQuestion.explanation}
-                    />
-                )}
-
-                {/* Navigation */}
-                <div className="flex items-center justify-center">
-                    {!isSubmitted ? (
-                        <Button
-                            onClick={handleSubmit}
-                            disabled={!selectedAnswer}
-                            size="lg"
-                            className="w-full sm:w-auto px-12"
+            <div
+                className="relative pb-20 overflow-auto"
+                style={{ height: isFullScreen ? "100vh" : "calc(100vh - 80px)" }}
+            >
+                <div className="w-full min-h-full py-8 px-4">
+                    <div className="max-w-5xl mx-auto relative">
+                        {/* Questions Container with Scaling */}
+                        <div
+                            className="bg-[#fafaf9] shadow-2xl rounded-sm p-4 sm:p-12 min-h-screen relative overflow-hidden"
+                            style={{
+                                transform: `scale(${zoom})`,
+                                transformOrigin: "top center",
+                                width: "100%",
+                                color: '#1f2937',
+                                marginBottom: zoom > 1 ? `${(zoom - 1) * 100}%` : "0",
+                                transition: "transform 0.2s ease-out",
+                            }}
                         >
-                            تأكيد الإجابة
-                        </Button>
-                    ) : (
-                        <Button onClick={handleNext} size="lg" className="w-full sm:w-auto px-12">
-                            {currentIndex === questions.length - 1
-                                ? "عرض النتيجة"
-                                : "السؤال التالي"}
-                            <ChevronLeft className="mr-2 h-4 w-4" />
-                        </Button>
-                    )}
+                            {/* Question Content */}
+                            <div className="relative z-20">
+                                {questions.map((question, qIdx) => {
+                                    const isSubmitted = submittedQuestions.has(question.id);
+                                    const selectedChoice = selectedAnswers[question.id];
+                                    // Always use the original answer key logic
+                                    const origQuestion = (questionsData.questions as Question[]).find(origQ => origQ.id === question.id);
+                                    const correctAnswer = getCorrectAnswerText(question.answer, origQuestion?.choices || []);
+
+                                    return (
+                                        <div key={question.id} className="mb-16 border-b-2 border-slate-200 pb-10 last:border-0 relative">
+                                            <div className="flex items-start gap-4 mb-6">
+                                                <span className="bg-primary text-primary-foreground w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0">
+                                                    {qIdx + 1}
+                                                </span>
+                                                <h2 className="text-xl font-bold leading-relaxed text-[#111827]">{question.question}</h2>
+                                            </div>
+
+                                            <div className="space-y-4 mr-12">
+                                                {(question.type === "mcq" ? (question.choices || []) : ["صح", "خطأ"]).map((choice, cIdx) => {
+                                                    const isCorrect = choice === correctAnswer;
+                                                    const isUserChoice = selectedChoice === choice;
+                                                    const canClick = !isSubmitted;
+
+                                                    return (
+                                                        <button
+                                                            key={`${question.id}-${choice}`}
+                                                            onClick={() => handleChoiceClick(question.id, choice)}
+                                                            disabled={isSubmitted}
+                                                            className={cn(
+                                                                "w-full p-4 rounded-xl border-2 transition-all flex items-center gap-4 text-right group",
+                                                                "active:scale-[0.98]",
+                                                                canClick && "hover:border-primary hover:bg-primary/5 cursor-pointer",
+                                                                !canClick && !isSubmitted && "cursor-default opacity-90",
+                                                                isSubmitted && isCorrect && "bg-green-100 border-green-500 ring-2 ring-green-200 text-green-900",
+                                                                isSubmitted && isUserChoice && !isCorrect && "bg-red-100 border-red-500 ring-2 ring-red-200 text-red-900",
+                                                                !isSubmitted && "border-slate-200 bg-white text-slate-700 shadow-sm"
+                                                            )}
+                                                        >
+                                                            <span className={cn(
+                                                                "w-8 h-8 rounded-full border flex items-center justify-center text-sm font-bold shrink-0 transition-colors",
+                                                                isSubmitted && isCorrect ? "border-green-600 bg-green-600 text-white" :
+                                                                    canClick ? "border-slate-400 group-hover:border-primary" : "border-slate-300"
+                                                            )}>
+                                                                {String.fromCharCode(65 + cIdx)}
+                                                            </span>
+                                                            <span className="text-lg font-semibold flex-1">{choice}</span>
+
+                                                            {isSubmitted && isCorrect && (
+                                                                <span className="bg-green-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-in zoom-in-50">
+                                                                    إجابة صحيحة ✓
+                                                                </span>
+                                                            )}
+                                                            {isSubmitted && isUserChoice && !isCorrect && (
+                                                                <span className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-in zoom-in-50">
+                                                                    إجابتك ✗
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {isSubmitted && (
+                                                <div className="mt-8 mr-12 bg-blue-50 border-r-4 border-blue-500 p-6 rounded-l-2xl shadow-sm transition-all animate-in fade-in slide-in-from-right-4">
+                                                    <h3 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
+                                                        <span className="text-2xl">💡</span> الشرح والتعليل
+                                                    </h3>
+                                                    <p className="text-blue-900 leading-relaxed font-medium text-lg">{question.explanation}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -32,20 +32,21 @@ export default function StudyModePDF() {
     const [zoom, setZoom] = useState(1);
     const [showToolbar, setShowToolbar] = useState(false);
     const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isDrawingMode, setIsDrawingMode] = useState(true);
 
     const canvasRef = useRef<ReactSketchCanvasRef>(null);
     const contentRef = useRef<HTMLDivElement>(null);
 
     // Toggle eraser mode when tool changes
     useEffect(() => {
-        if (canvasRef.current) {
+        if (canvasRef.current && isDrawingMode) {
             if (activeTool === "eraser") {
                 canvasRef.current.eraseMode(true);
             } else {
                 canvasRef.current.eraseMode(false);
             }
         }
-    }, [activeTool]);
+    }, [activeTool, isDrawingMode]);
 
     // Load saved drawing on mount
     useEffect(() => {
@@ -85,7 +86,7 @@ export default function StudyModePDF() {
     };
 
     const handleCanvasChange = async () => {
-        if (canvasRef.current) {
+        if (canvasRef.current && isDrawingMode) {
             try {
                 const paths = await canvasRef.current.exportPaths();
                 if (paths && paths.length > 0) {
@@ -115,7 +116,6 @@ export default function StudyModePDF() {
 
     const getCurrentColor = () => {
         if (activeTool === "highlighter") {
-            // Add transparency to highlighter (40% opacity)
             const hexToRgba = (hex: string) => {
                 const r = parseInt(hex.slice(1, 3), 16);
                 const g = parseInt(hex.slice(3, 5), 16);
@@ -131,7 +131,7 @@ export default function StudyModePDF() {
         <div className="min-h-screen bg-background">
             {/* Header */}
             {!isFullScreen && (
-                <div className="sticky top-0 z-40 bg-background border-b">
+                <div className="sticky top-0 z-40 bg-background border-b backdrop-blur-sm bg-background/95">
                     <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
                         <div className="flex-1">
                             <h1 className="text-base sm:text-lg md:text-xl font-bold">وضع الدراسة - {chunk.name}</h1>
@@ -140,6 +140,24 @@ export default function StudyModePDF() {
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
+                            <Button
+                                variant={isDrawingMode ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setIsDrawingMode(!isDrawingMode)}
+                                className="gap-2"
+                            >
+                                {isDrawingMode ? (
+                                    <>
+                                        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                        <span>إيقاف الرسم</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Pencil className="h-4 w-4" />
+                                        <span>تفعيل الرسم</span>
+                                    </>
+                                )}
+                            </Button>
                             <Link href="/">
                                 <Button variant="outline" size="icon">
                                     <Home className="h-4 w-4" />
@@ -160,22 +178,24 @@ export default function StudyModePDF() {
                 highlightColor={highlightColor}
                 onHighlightColorChange={setHighlightColor}
                 onClear={handleClearCanvas}
-                isVisible={showToolbar}
+                isVisible={showToolbar && isDrawingMode}
                 onClose={() => setShowToolbar(false)}
             />
 
             {/* Mobile Toolbar Toggle Button */}
-            <Button
-                variant="default"
-                size="icon"
-                className={cn(
-                    "fixed top-20 right-4 z-40 md:hidden shadow-lg transition-all",
-                    isFullScreen && "top-4"
-                )}
-                onClick={() => setShowToolbar(!showToolbar)}
-            >
-                <Pencil className="h-5 w-5" />
-            </Button>
+            {isDrawingMode && (
+                <Button
+                    variant="default"
+                    size="icon"
+                    className={cn(
+                        "fixed top-20 right-4 z-40 md:hidden shadow-lg transition-all bg-primary text-primary-foreground",
+                        isFullScreen && "top-4"
+                    )}
+                    onClick={() => setShowToolbar(!showToolbar)}
+                >
+                    <Pencil className="h-5 w-5" />
+                </Button>
+            )}
 
             {/* Zoom Controls */}
             <ZoomControls
@@ -189,7 +209,10 @@ export default function StudyModePDF() {
             {/* Main Content - Static Container */}
             <div
                 className="relative pb-20 overflow-auto"
-                style={{ height: isFullScreen ? "100vh" : "calc(100vh - 80px)" }}
+                style={{
+                    height: isFullScreen ? "100vh" : "calc(100vh - 80px)",
+                    touchAction: isDrawingMode ? "pan-y pinch-zoom" : "auto"
+                }}
             >
                 <div className="w-full min-h-full py-4 sm:py-8 px-2 sm:px-4 md:px-6 lg:px-8">
                     {/* Content Container - Static and Centered */}
@@ -323,7 +346,10 @@ export default function StudyModePDF() {
 
                         {/* Drawing Canvas Overlay */}
                         <div
-                            className="absolute top-0 left-0 w-full pointer-events-auto"
+                            className={cn(
+                                "absolute top-0 left-0 w-full",
+                                isDrawingMode ? "pointer-events-auto" : "pointer-events-none"
+                            )}
                             style={{
                                 height: `${zoom * 100}%`,
                             }}
@@ -339,7 +365,8 @@ export default function StudyModePDF() {
                                     border: "none",
                                     width: "100%",
                                     height: "100%",
-                                    cursor: activeTool === "eraser" ? "crosshair" : activeTool === "pen" ? "crosshair" : "pointer",
+                                    cursor: isDrawingMode ? "crosshair" : "default",
+                                    touchAction: "none" // Force drawing with 1 finger on the canvas
                                 }}
                             />
                         </div>

@@ -17,7 +17,7 @@ export function getChunkById(id: number) {
 /**
  * Get all lectures in a chunk
  */
-export function getChunkLectures(chunkId: number): number[] {
+export function getChunkLectures(chunkId: number): readonly number[] {
     const chunk = getChunkById(chunkId);
     return chunk ? chunk.lectures : [];
 }

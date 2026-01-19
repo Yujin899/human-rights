@@ -20,7 +20,6 @@ import Link from "next/link";
 import questionsData from "@/data/questions.json";
 
 export default function FullExam() {
-    const router = useRouter();
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [userAnswers, setUserAnswers] = useState<UserAnswer[]>([]);

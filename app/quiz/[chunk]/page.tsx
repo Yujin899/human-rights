@@ -36,7 +36,7 @@ export default function QuizMode() {
             chunkLectures.includes(q.lecture_number)
         );
         setQuestions(shuffleArray(filtered));
-    }, [chunkId]); // Only depend on chunkId to avoid unnecessary re-shuffles if chunkLectures re-creates
+    }, [chunkId, chunkLectures]); // Added chunkLectures to dependencies
 
     if (!chunk || (questions.length === 0 && currentIndex === 0 && !isCompleted)) {
         if (!chunk) router.push("/");

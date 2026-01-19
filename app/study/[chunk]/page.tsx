@@ -1,18 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowRight, ArrowLeft, Home } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Home, Pencil } from "lucide-react";
 import Link from "next/link";
+import { ReactSketchCanvas, ReactSketchCanvasRef } from "react-sketch-canvas";
 import questionsData from "@/data/questions.json";
 import { getCorrectAnswerText } from "@/lib/validation";
 import { getChunkById, getChunkLectures } from "@/lib/chunks";
+import { DrawingToolbar } from "@/components/DrawingToolbar";
+import { ZoomControls } from "@/components/ZoomControls";
+import { cn } from "@/lib/utils";
 
-export default function StudyMode() {
+export default function StudyModePDF() {
     const params = useParams();
     const router = useRouter();
     const chunkId = parseInt(params.chunk as string);
@@ -24,175 +26,335 @@ export default function StudyMode() {
         chunkLectures.includes(q.lecture_number)
     );
 
-    const [currentIndex, setCurrentIndex] = useState(0);
+    const [activeTool, setActiveTool] = useState<"pen" | "highlighter" | "eraser">("pen");
+    const [penColor, setPenColor] = useState("#000000");
+    const [highlightColor, setHighlightColor] = useState("#fef08a");
+    const [zoom, setZoom] = useState(1);
+    const [showToolbar, setShowToolbar] = useState(false);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+
+    const canvasRef = useRef<ReactSketchCanvasRef>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+
+    // Toggle eraser mode when tool changes
+    useEffect(() => {
+        if (canvasRef.current) {
+            if (activeTool === "eraser") {
+                canvasRef.current.eraseMode(true);
+            } else {
+                canvasRef.current.eraseMode(false);
+            }
+        }
+    }, [activeTool]);
+
+    // Load saved drawing on mount
+    useEffect(() => {
+        const loadSavedDrawing = async () => {
+            if (canvasRef.current) {
+                const savedPaths = localStorage.getItem(`study-drawing-${chunkId}`);
+                if (savedPaths) {
+                    try {
+                        const paths = JSON.parse(savedPaths);
+                        if (Array.isArray(paths) && paths.length > 0) {
+                            canvasRef.current.loadPaths(paths);
+                        }
+                    } catch (e) {
+                        console.error("Failed to load saved drawing:", e);
+                    }
+                }
+            }
+        };
+        // Small delay to ensure canvas is ready
+        const timer = setTimeout(loadSavedDrawing, 500);
+        return () => clearTimeout(timer);
+    }, [chunkId]);
+
+    const handleZoomIn = () => {
+        setZoom((prev) => Math.min(prev + 0.1, 2));
+    };
+
+    const handleZoomOut = () => {
+        setZoom((prev) => Math.max(prev - 0.1, 0.5));
+    };
+
+    const handleClearCanvas = () => {
+        if (canvasRef.current) {
+            canvasRef.current.clearCanvas();
+            localStorage.removeItem(`study-drawing-${chunkId}`);
+        }
+    };
+
+    const handleCanvasChange = async () => {
+        if (canvasRef.current) {
+            try {
+                const paths = await canvasRef.current.exportPaths();
+                if (paths && paths.length > 0) {
+                    localStorage.setItem(`study-drawing-${chunkId}`, JSON.stringify(paths));
+                } else {
+                    localStorage.removeItem(`study-drawing-${chunkId}`);
+                }
+            } catch (e) {
+                console.error("Failed to save drawing:", e);
+            }
+        }
+    };
+
+    const handleToggleFullScreen = () => {
+        setIsFullScreen(!isFullScreen);
+    };
 
     if (!chunk || chunkQuestions.length === 0) {
         router.push("/");
         return null;
     }
 
-    const currentQuestion = chunkQuestions[currentIndex];
-    const isLast = currentIndex === chunkQuestions.length - 1;
-    const isFirst = currentIndex === 0;
+    const getStrokeWidth = () => {
+        if (activeTool === "highlighter") return 20;
+        return 4;
+    };
 
-    // Get the correct answer text
-    const correctAnswerText = getCorrectAnswerText(
-        currentQuestion.answer,
-        currentQuestion.choices
-    );
+    const getCurrentColor = () => {
+        if (activeTool === "highlighter") {
+            // Add transparency to highlighter (40% opacity)
+            const hexToRgba = (hex: string) => {
+                const r = parseInt(hex.slice(1, 3), 16);
+                const g = parseInt(hex.slice(3, 5), 16);
+                const b = parseInt(hex.slice(5, 7), 16);
+                return `rgba(${r}, ${g}, ${b}, 0.4)`;
+            };
+            return hexToRgba(highlightColor);
+        }
+        return penColor;
+    };
 
     return (
-        <div className="min-h-screen bg-background py-4 sm:py-6 md:py-8 px-3 sm:px-4">
-            <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-                    <div className="flex-1">
-                        <h1 className="text-xl sm:text-2xl font-bold">وضع الدراسة - {chunk.name}</h1>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                            المحاضرات {chunk.lectures.join(" - ")}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-2 sm:gap-3">
-                        <Link href="/">
-                            <Button variant="outline" size="icon">
-                                <Home className="h-4 w-4 sm:h-5 sm:w-5" />
-                            </Button>
-                        </Link>
-                        <ThemeToggle />
+        <div className="min-h-screen bg-background">
+            {/* Header */}
+            {!isFullScreen && (
+                <div className="sticky top-0 z-40 bg-background border-b">
+                    <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+                        <div className="flex-1">
+                            <h1 className="text-base sm:text-lg md:text-xl font-bold">وضع الدراسة - {chunk.name}</h1>
+                            <p className="text-xs sm:text-sm text-muted-foreground">
+                                المحاضرات {chunk.lectures.join(" - ")} • {chunkQuestions.length} سؤال
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Link href="/">
+                                <Button variant="outline" size="icon">
+                                    <Home className="h-4 w-4" />
+                                </Button>
+                            </Link>
+                            <ThemeToggle />
+                        </div>
                     </div>
                 </div>
+            )}
 
-                {/* Progress */}
-                <div className="text-center text-sm text-muted-foreground">
-                    السؤال {currentIndex + 1} من {chunkQuestions.length}
-                </div>
+            {/* Drawing Toolbar */}
+            <DrawingToolbar
+                activeTool={activeTool}
+                onToolChange={setActiveTool}
+                penColor={penColor}
+                onColorChange={setPenColor}
+                highlightColor={highlightColor}
+                onHighlightColorChange={setHighlightColor}
+                onClear={handleClearCanvas}
+                isVisible={showToolbar}
+                onClose={() => setShowToolbar(false)}
+            />
 
-                {/* Question Card */}
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={currentIndex}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        transition={{ duration: 0.3 }}
-                    >
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="text-xl leading-relaxed">
-                                    {currentQuestion.question}
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                {/* MCQ Choices */}
-                                {currentQuestion.type === "mcq" && currentQuestion.choices && (
-                                    <div className="space-y-2">
-                                        {currentQuestion.choices.map((choice, idx) => {
-                                            const isCorrect = choice === correctAnswerText;
-                                            return (
-                                                <div
-                                                    key={idx}
-                                                    className={`p-3 rounded-lg border-2 flex items-center justify-start transition-all duration-200 gap-3
-                                                        ${isCorrect
-                                                            ? "bg-primary/10 border-primary"
-                                                            : "bg-muted border-transparent"
-                                                        }`}
-                                                >
-                                                    {isCorrect && (
-                                                        <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                                                            <span className="text-primary-foreground text-xs font-bold">✓</span>
+            {/* Mobile Toolbar Toggle Button */}
+            <Button
+                variant="default"
+                size="icon"
+                className={cn(
+                    "fixed top-20 right-4 z-40 md:hidden shadow-lg transition-all",
+                    isFullScreen && "top-4"
+                )}
+                onClick={() => setShowToolbar(!showToolbar)}
+            >
+                <Pencil className="h-5 w-5" />
+            </Button>
+
+            {/* Zoom Controls */}
+            <ZoomControls
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onReset={handleToggleFullScreen}
+                currentZoom={zoom}
+                isFullScreen={isFullScreen}
+            />
+
+            {/* Main Content - Static Container */}
+            <div
+                className="relative pb-20 overflow-auto"
+                style={{ height: isFullScreen ? "100vh" : "calc(100vh - 80px)" }}
+            >
+                <div className="w-full min-h-full py-4 sm:py-8 px-2 sm:px-4 md:px-6 lg:px-8">
+                    {/* Content Container - Static and Centered */}
+                    <div className="max-w-5xl mx-auto relative">
+                        {/* PDF Content */}
+                        <div
+                            ref={contentRef}
+                            className="shadow-2xl p-4 sm:p-6 md:p-8 lg:p-12 origin-top"
+                            style={{
+                                backgroundColor: '#fafaf9',
+                                color: '#1f2937',
+                                transform: `scale(${zoom})`,
+                                transformOrigin: "top center",
+                                transition: "transform 0.3s ease",
+                                marginBottom: zoom > 1 ? `${(zoom - 1) * 100}%` : "0",
+                            }}
+                        >
+                            {/* Questions */}
+                            {chunkQuestions.map((question, index) => {
+                                const correctAnswerText = getCorrectAnswerText(
+                                    question.answer,
+                                    question.choices
+                                );
+
+                                return (
+                                    <div
+                                        key={question.id}
+                                        className="mb-12 pb-8 last:border-b-0 page-break-after"
+                                        style={{
+                                            borderBottom: '2px solid #e5e7eb',
+                                            pageBreakAfter: "always",
+                                            breakAfter: "page",
+                                        }}
+                                    >
+                                        {/* Question Header */}
+                                        <div className="mb-4">
+                                            <div className="flex items-start gap-3 mb-2">
+                                                <span className="inline-flex items-center justify-center bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-base font-bold shrink-0">
+                                                    {index + 1}
+                                                </span>
+                                                <h2 className="text-base sm:text-lg md:text-xl font-bold leading-relaxed" style={{ color: '#111827' }}>
+                                                    {question.question}
+                                                </h2>
+                                            </div>
+                                            <p className="text-xs sm:text-sm mr-14" style={{ color: '#6b7280' }}>
+                                                المحاضرة {question.lecture_number} • {question.type === "mcq" ? "اختيار متعدد" : "صح أو خطأ"}
+                                            </p>
+                                        </div>
+
+                                        {/* MCQ Choices */}
+                                        {question.type === "mcq" && question.choices && (
+                                            <div className="space-y-2 mb-6 mr-14">
+                                                <p className="font-semibold text-sm sm:text-base mb-3" style={{ color: '#374151' }}>الخيارات:</p>
+                                                {question.choices.map((choice, idx) => {
+                                                    const isCorrect = choice === correctAnswerText;
+                                                    const optionLetter = String.fromCharCode(65 + idx);
+                                                    return (
+                                                        <div key={idx} className="py-1.5 leading-relaxed">
+                                                            <span className="font-medium text-sm sm:text-base" style={{ color: '#374151' }}>
+                                                                {optionLetter}.{" "}
+                                                            </span>
+                                                            <span
+                                                                className="text-sm sm:text-base"
+                                                                style={{
+                                                                    backgroundColor: isCorrect ? '#fef08a' : 'transparent',
+                                                                    color: '#111827',
+                                                                    padding: isCorrect ? '2px 6px' : '0',
+                                                                    fontWeight: isCorrect ? '600' : '400',
+                                                                }}
+                                                            >
+                                                                {choice}
+                                                            </span>
+                                                            {isCorrect && (
+                                                                <span className="mr-2 text-sm font-bold" style={{ color: '#16a34a' }}>
+                                                                    ✓
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                    <div className="text-right flex-1">
-                                                        <p className="font-medium">{choice}</p>
-                                                        {isCorrect && (
-                                                            <p className="text-sm text-primary mt-1">
-                                                                ✓ الإجابة الصحيحة
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
 
-                                {/* True/False with Checkboxes */}
-                                {currentQuestion.type === "true_false" && (
-                                    <div className="space-y-3">
-                                        {["صح", "خطأ"].map((option) => {
-                                            const isCorrect = option === currentQuestion.answer;
-                                            return (
-                                                <div
-                                                    key={option}
-                                                    className={`p-4 rounded-lg border-2 flex items-center justify-start transition-all duration-200 gap-3
-                                                        ${isCorrect
-                                                            ? "bg-primary/10 border-primary"
-                                                            : "bg-muted border-transparent"
-                                                        }`}
-                                                >
-                                                    <div
-                                                        className={`w-6 h-6 rounded border-2 flex items-center justify-center shrink-0 ${isCorrect
-                                                            ? "bg-primary border-primary"
-                                                            : "bg-muted border-border"
-                                                            }`}
-                                                    >
-                                                        {isCorrect && (
-                                                            <span className="text-primary-foreground font-bold text-sm">
-                                                                {option === "صح" ? "✓" : "✕"}
+                                        {/* True/False */}
+                                        {question.type === "true_false" && (
+                                            <div className="space-y-2 mb-6 mr-14">
+                                                <p className="font-semibold text-sm sm:text-base mb-3" style={{ color: '#374151' }}>الخيارات:</p>
+                                                {["صح", "خطأ"].map((option) => {
+                                                    const isCorrect = option === question.answer;
+                                                    return (
+                                                        <div key={option} className="py-1.5 leading-relaxed">
+                                                            <span className="font-medium text-sm sm:text-base" style={{ color: '#374151' }}>
+                                                                •{" "}
                                                             </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="text-right flex-1">
-                                                        <p className="font-medium">{option}</p>
-                                                        {isCorrect && (
-                                                            <span className="text-sm text-primary">
-                                                                الإجابة الصحيحة
+                                                            <span
+                                                                className="text-sm sm:text-base"
+                                                                style={{
+                                                                    backgroundColor: isCorrect ? '#fef08a' : 'transparent',
+                                                                    color: '#111827',
+                                                                    padding: isCorrect ? '2px 6px' : '0',
+                                                                    fontWeight: isCorrect ? '600' : '400',
+                                                                }}
+                                                            >
+                                                                {option}
                                                             </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
+                                                            {isCorrect && (
+                                                                <span className="mr-2 text-sm font-bold" style={{ color: '#16a34a' }}>
+                                                                    ✓
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        {/* Explanation */}
+                                        <div className="border-l-4 p-4 mr-14" style={{ backgroundColor: '#eff6ff', borderColor: '#3b82f6' }}>
+                                            <h3 className="font-bold mb-2 flex items-center gap-2 text-sm sm:text-base" style={{ color: '#1e3a8a' }}>
+                                                <span className="text-lg">💡</span>
+                                                الشرح
+                                            </h3>
+                                            <p className="leading-relaxed text-sm sm:text-base" style={{ color: '#1e40af' }}>
+                                                {question.explanation}
+                                            </p>
+                                        </div>
                                     </div>
-                                )}
+                                );
+                            })}
+                        </div>
 
-                                {/* Explanation */}
-                                <Card className="bg-primary/5 border-primary/20">
-                                    <CardHeader>
-                                        <CardTitle className="text-lg">الشرح</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <p className="leading-relaxed">
-                                            {currentQuestion.explanation}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-                            </CardContent>
-                        </Card>
-                    </motion.div>
-                </AnimatePresence>
-
-                {/* Navigation */}
-                <div className="flex items-center justify-between gap-4">
-                    <Button
-                        onClick={() => setCurrentIndex(currentIndex - 1)}
-                        disabled={isFirst}
-                        variant="outline"
-                    >
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                        السابق
-                    </Button>
-
-                    <Button
-                        onClick={() =>
-                            isLast ? router.push("/") : setCurrentIndex(currentIndex + 1)
-                        }
-                    >
-                        {isLast ? "العودة للرئيسية" : "التالي"}
-                        <ArrowLeft className="mr-2 h-4 w-4" />
-                    </Button>
+                        {/* Drawing Canvas Overlay */}
+                        <div
+                            className="absolute top-0 left-0 w-full pointer-events-auto"
+                            style={{
+                                height: `${zoom * 100}%`,
+                            }}
+                        >
+                            <ReactSketchCanvas
+                                ref={canvasRef}
+                                strokeWidth={getStrokeWidth()}
+                                strokeColor={getCurrentColor()}
+                                canvasColor="transparent"
+                                eraserWidth={30}
+                                onStroke={handleCanvasChange}
+                                style={{
+                                    border: "none",
+                                    width: "100%",
+                                    height: "100%",
+                                    cursor: activeTool === "eraser" ? "crosshair" : activeTool === "pen" ? "crosshair" : "pointer",
+                                }}
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
+
+            <style jsx global>{`
+                @media print {
+                    .page-break-after {
+                        page-break-after: always;
+                        break-after: page;
+                    }
+                }
+            `}</style>
         </div>
     );
 }
